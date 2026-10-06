@@ -1,29 +1,29 @@
 import io
+import os
+import smtplib
 import pandas as pd
-from datetime import datetime, date, timedelta
-from typing import List, Optional
-from enum import Enum
+from datetime import datetime, date
+from typing import List
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response, Form
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import create_engine, select, func, and_, or_
+from sqlalchemy import create_engine, func, and_
 from sqlalchemy.orm import Session, sessionmaker
 
-# --- DATABASE SETUP ---
-DATABASE_URL = "sqlite:///./invoices.db"  # Swap with postgresql:// for production
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+# --- DATABASE SETUP (AUTO-SWITCHES TO POSTGRES) ---
+# Automatically pulls the Render Postgres database link if present, defaults to SQLite
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./invoices.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-app = FastAPI(title="QuickBooks-Style Invoice API Engine", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="QuickBooks-Style Invoice Engine")
 
 def get_db():
     db = SessionLocal()
@@ -32,218 +32,179 @@ def get_db():
     finally:
         db.close()
 
-# --- REUSE THE DATABASE MODELS DEFINED IN PRIOR TURNS ---
-# Base, Customer, Invoice, InvoiceItem, InvoiceStatus are applied here
 from models import Base, Customer, Invoice, InvoiceItem, InvoiceStatus
 Base.metadata.create_all(bind=engine)
 
-# --- PYDANTIC SCHEMAS ---
-class ItemCreate(BaseModel):
-    description: str
-    quantity: float = Field(gt=0)
-    unit_price: float = Field(gt=0)
+# --- AUTOMATED EMAIL DELIVERY SYSTEM ---
+def send_invoice_email(to_email: str, customer_name: str, invoice_number: str, pdf_bytes: bytes):
+    smtp_server = os.getenv("SMTP_SERVER", "://gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    sender_email = os.getenv("SENDER_EMAIL")
+    sender_password = os.getenv("SENDER_PASSWORD")
 
-class InvoiceCreate(BaseModel):
-    customer_email: EmailStr
-    customer_name: str
-    due_date: date
-    items: List[ItemCreate]
-    tax_rate: float = Field(default=0.0, ge=0)
+    if not sender_email or not sender_password:
+        print("Email settings missing. Skipping live delivery.")
+        return False
 
-# --- 1. CORE INVOICE & CUSTOMER CREATION ENDPOINTS ---
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = to_email
+    msg['Subject'] = f"New Invoice {invoice_number} from Your Company"
 
-@app.post("/api/invoices", response_model=dict)
-def create_invoice(payload: InvoiceCreate, db: Session = Depends(get_db)):
-    # Resolve or provision customer automatically
-    customer = db.query(Customer).filter(Customer.email == payload.customer_email).first()
-    if not customer:
-        customer = Customer(name=payload.customer_name, email=payload.customer_email)
-        db.add(customer)
-        db.flush()
+    body = f"Hello {customer_name},\n\nPlease find attached your invoice {invoice_number}.\n\nThank you for your business!"
+    msg.attach(MIMEText(body, 'plain'))
 
-    # Create distinct sequential system tracking code
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    invoice_num = f"INV-{timestamp}"
+    part = MIMEApplication(pdf_bytes, Name=f"{invoice_number}.pdf")
+    part['Content-Disposition'] = f'attachment; filename="{invoice_number}.pdf"'
+    msg.attach(part)
 
-    subtotal = 0.0
-    invoice_items = []
-    
-    for item in payload.items:
-        line_total = item.quantity * item.unit_price
-        subtotal += line_total
-        invoice_items.append(InvoiceItem(
-            description=item.description,
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            line_total=line_total
-        ))
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"SMTP Error: {e}")
+        return False
 
-    tax_total = subtotal * (payload.tax_rate / 100)
-    total_amount = subtotal + tax_total
-
-    new_invoice = Invoice(
-        invoice_number=invoice_num,
-        customer_id=customer.id,
-        due_date=payload.due_date,
-        subtotal=subtotal,
-        tax_total=tax_total,
-        total_amount=total_amount,
-        amount_paid=0.0,
-        status=InvoiceStatus.UNPAID,
-        items=invoice_items
-    )
-    
-    db.add(new_invoice)
-    db.commit()
-    return {"message": "Invoice built successfully", "invoice_number": invoice_num}
-
-# --- 2. THE DASHBOARD AGING & KPI ENGINE ---
-
-@app.get("/api/dashboard/metrics")
-def get_dashboard_metrics(db: Session = Depends(get_db)):
+# --- 3. FULLY DESIGNED VISUAL FRONTEND (HOMEPAGE) ---
+@app.get("/", response_class=HTMLResponse)
+def render_dashboard(db: Session = Depends(get_db)):
     today = date.today()
     
-    # Refresh systemic overdue statuses prior to compiling reports
-    db.query(Invoice).filter(
-        and_(Invoice.due_date < today, Invoice.status != InvoiceStatus.PAID)
-    ).update({"status": InvoiceStatus.OVERDUE})
+    # Auto-update overdue records
+    db.query(Invoice).filter(and_(Invoice.due_date < today, Invoice.status != InvoiceStatus.PAID)).update({"status": InvoiceStatus.OVERDUE})
     db.commit()
 
-    # Compute high-level visual matrix KPIs
-    kpis = db.query(
-        func.sum(Invoice.total_amount).label("total"),
-        func.sum(Invoice.amount_paid).label("paid")
-    ).first()
-    
+    # Metrics
+    kpis = db.query(func.sum(Invoice.total_amount).label("total"), func.sum(Invoice.amount_paid).label("paid")).first()
     total_revenue = float(kpis.total or 0.0)
     total_collected = float(kpis.paid or 0.0)
     total_receivable = total_revenue - total_collected
 
-    # Compile the 30-60-90 Day Accounts Receivable Aging Report
-    aging_buckets = {"current": 0.0, "30_days": 0.0, "60_days": 0.0, "90_plus": 0.0}
-    overdue_invoices = db.query(Invoice).filter(Invoice.status == InvoiceStatus.OVERDUE).all()
-    
-    for inv in overdue_invoices:
-        days_past = (today - inv.due_date).days
-        unpaid_amt = float(inv.total_amount - inv.amount_paid)
-        if days_past <= 30:
-            aging_buckets["30_days"] += unpaid_amt
-        elif days_past <= 60:
-            aging_buckets["60_days"] += unpaid_amt
-        elif days_past <= 90:
-            aging_buckets["90_days"] += unpaid_amt
-        else:
-            aging_buckets["90_plus"] += unpaid_amt
+    # Recent activity list
+    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
+    rows = "".join([
+        f"<tr><td>{inv.invoice_number}</td><td>{inv.customer.name}</td><td>${inv.total_amount:,.2f}</td><td><span class='badge {inv.status.value.lower()}'>{inv.status.value}</span></td></tr>" 
+        for inv in recent_invoices
+    ])
 
-    return {
-        "summary": {
-            "total_revenue": total_revenue,
-            "total_collected": total_collected,
-            "total_receivable": total_receivable
-        },
-        "aging_report": aging_buckets
-    }
-
-# --- 3. EXCEL FILE INGESTION PIPELINE ---
-
-@app.post("/api/invoices/import-excel")
-async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="Invalid layout. System strictly accepts Excel extensions.")
-    
-    contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
-    
-    # Dynamic ingestion validation framework
-    required = ['invoice_number', 'customer_name', 'customer_email', 'due_date', 'total_amount']
-    if not all(col in df.columns for col in required):
-         raise HTTPException(status_code=400, detail=f"Missing structural parameters. Required layout columns: {required}")
-    
-    imported_count = 0
-    for _, row in df.iterrows():
-        customer = db.query(Customer).filter(Customer.email == row['customer_email']).first()
-        if not customer:
-            customer = Customer(name=row['customer_name'], email=row['customer_email'])
-            db.add(customer)
-            db.flush()
-
-        if db.query(Invoice).filter(Invoice.invoice_number == str(row['invoice_number'])).first():
-            continue  # Keep data integrity pristine by ignoring historical line duplication
-
-        due_dt = pd.to_datetime(row['due_date']).date()
-        total = float(row['total_amount'])
-        paid = float(row.get('amount_paid', 0.0))
-        status = InvoiceStatus.PAID if paid >= total else (InvoiceStatus.OVERDUE if due_dt < date.today() else InvoiceStatus.UNPAID)
-
-        inv = Invoice(
-            invoice_number=str(row['invoice_number']),
-            customer_id=customer.id,
-            due_date=due_dt,
-            subtotal=total,
-            tax_total=0.0,
-            total_amount=total,
-            amount_paid=paid,
-            status=status
-        )
-        db.add(inv)
-        imported_count += 1
-        
-    db.commit()
-    return {"status": "Success", "records_processed": imported_count}
-
-# --- 4. PIXEL-PERFECT PDF GENERATION FOR DOWNLOADS ---
-
-@app.get("/api/invoices/{invoice_id}/pdf")
-def generate_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
-    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice entry not identified.")
-        
-    # Lazy import WeasyPrint to keep microcontainer light during standard queries
-    from weasyprint import HTML
-    
-    # Inline functional styling template matching QuickBooks' clean interface
-    html_template = f"""
+    return f"""
+    <!DOCTYPE html>
     <html>
     <head>
+        <title>QuickBooks Style Dashboard</title>
         <style>
-            body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
-            .header {{ display: flex; justify-content: space-between; border-bottom: 2px solid #2ca01c; padding-bottom: 20px; }}
-            .company-title {{ font-size: 28px; font-weight: bold; color: #2ca01c; }}
-            .details-table {{ width: 100%; margin-top: 40px; border-collapse: collapse; }}
-            .details-table th {{ background-color: #f4f5f8; padding: 12px; text-align: left; font-size: 14px; border-bottom: 2px solid #ddd; }}
-            .details-table td {{ padding: 12px; border-bottom: 1px solid #eee; font-size: 13px; }}
-            .totals {{ float: right; width: 30%; margin-top: 30px; font-size: 14px; }}
-            .totals-row {{ display: flex; justify-content: space-between; padding: 6px 0; }}
-            .grand-total {{ font-size: 18px; font-weight: bold; color: #2ca01c; border-top: 1px solid #ddd; padding-top: 8px; }}
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f4f5f8; margin: 0; padding: 30px; color: #333; }}
+            .container {{ max-width: 1100px; margin: 0 auto; }}
+            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }}
+            h1 {{ color: #2ca01c; margin: 0; }}
+            .stats {{ display: flex; gap: 20px; margin-bottom: 30px; }}
+            .card {{ flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #2ca01c; }}
+            .card.unpaid {{ border-left-color: #ef5350; }}
+            .card.receivable {{ border-left-color: #ffb300; }}
+            .card h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; text-transform: uppercase; }}
+            .card div {{ font-size: 24px; font-weight: bold; }}
+            .workspace {{ display: flex; gap: 30px; }}
+            .panel {{ flex: 1; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
+            h2 {{ margin-top: 0; color: #444; border-bottom: 2px solid #f4f5f8; padding-bottom: 10px; }}
+            label {{ display: block; margin: 12px 0 6px 0; font-weight: 600; font-size: 14px; }}
+            input, select {{ width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }}
+            button {{ background: #2ca01c; color: white; border: none; padding: 12px 20px; font-size: 15px; font-weight: bold; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 15px; }}
+            button:hover {{ background: #248216; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #eee; }}
+            th {{ background: #f8f9fa; }}
+            .badge {{ padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }}
+            .badge.paid {{ background: #e8f5e9; color: #2e7d32; }}
+            .badge.unpaid {{ background: #ffebee; color: #c62828; }}
+            .badge.overdue {{ background: #fff8e1; color: #f57f17; }}
         </style>
     </head>
     <body>
-        <div class="header">
-            <div>
-                <div class="company-title">INVOICE</div>
-                <p><strong>To:</strong> {invoice.customer.name} ({invoice.customer.email})</p>
+        <div class="container">
+            <div class="header">
+                <h1>Invoice Management Workspace</h1>
             </div>
-            <div style="text-align: right;">
-                <p><strong>Invoice No:</strong> {invoice.invoice_number}</p>
-                <p><strong>Date:</strong> {invoice.issue_date}</p>
-                <p><strong>Due Date:</strong> {invoice.due_date}</p>
-                <p><strong>Status:</strong> <span style="color: {'#2ca01c' if invoice.status == InvoiceStatus.PAID else '#e53935'}">{invoice.status.value}</span></p>
+            
+            <div class="stats">
+                <div class="card"><h3>Total Revenue</h3><div>${total_revenue:,.2f}</div></div>
+                <div class="card unpaid"><h3>Total Collected</h3><div>${total_collected:,.2f}</div></div>
+                <div class="card receivable"><h3>Total Accounts Receivable</h3><div>${total_receivable:,.2f}</div></div>
+            </div>
+
+            <div class="workspace">
+                <div class="panel">
+                    <h2>Import Bulk Excel Data</h2>
+                    <form action="/api/invoices/import-excel" method="post" enctype="multipart/form-data">
+                        <label>Select Spreadsheet File (.xlsx)</label>
+                        <input type="file" name="file" accept=".xlsx, .xls" required />
+                        <button type="submit">Upload & Process Engine</button>
+                    </form>
+                    
+                    <h2 style="margin-top:40px;">Recent Activity</h2>
+                    <table>
+                        <thead><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h2>Quick Bill Generator</h2>
+                    <form action="/web/create" method="post">
+                        <label>Customer Name</label><input type="text" name="customer_name" required />
+                        <label>Customer Email</label><input type="email" name="customer_email" required />
+                        <label>Due Date</label><input type="date" name="due_date" required />
+                        <label>Item Description</label><input type="text" name="desc" required />
+                        <label>Quantity</label><input type="number" name="qty" value="1" step="0.01" required />
+                        <label>Unit Price ($)</label><input type="number" name="price" step="0.01" required />
+                        <button type="submit" style="background:#0077c5;">Create & Email Client</button>
+                    </form>
+                </div>
             </div>
         </div>
-        <table class="details-table">
-            <thead>
-                <tr>
-                    <th>Item Description</th>
-                    <th>Quantity</th>
-                    <th>Unit Price</th>
-                    <th>Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                {"".join([f"<tr><td>{item.description}</td><td>{item.quantity}</td><td>${item.unit_price:,.2f}</td><td>${item.line_total:,.2f}</td></tr>" for item in invoice.items])}
-            </tbody>
-        </table>
-        <div class="totals">
-            <div class="totals-row"><span>Subtotal:</span> <strong>${invoice.subtotal:,.2f}</strong></div>
-            <div class="totals-row"><span>Tax:</span> <strong>${invoice.tax_total:,.2f}</strong></div>
+    </body>
+    </html>
+    """
+
+# --- WEB FORM HANDLER WITH INTEGRATED PDF AND EMAIL ---
+@app.post("/web/create")
+def web_create_invoice(
+    customer_name: str = Form(...), customer_email: str = Form(...), due_date: str = Form(...),
+    desc: str = Form(...), qty: float = Form(...), price: float = Form(...), db: Session = Depends(get_db)
+):
+    from weasyprint import HTML
+
+    customer = db.query(Customer).filter(Customer.email == customer_email).first()
+    if not customer:
+        customer = Customer(name=customer_name, email=customer_email)
+        db.add(customer)
+        db.flush()
+
+    invoice_num = f"INV-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    total = qty * price
+
+    inv = Invoice(
+        invoice_number=invoice_num, customer_id=customer.id, due_date=datetime.strptime(due_date, "%Y-%m-%d").date(),
+        subtotal=total, tax_total=0.0, total_amount=total, amount_paid=0.0, status=InvoiceStatus.UNPAID
+    )
+    db.add(inv)
+    db.flush()
+
+    item = InvoiceItem(invoice_id=inv.id, description=desc, quantity=qty, unit_price=price, line_total=total)
+    db.add(item)
+    db.commit()
+
+    # Generate custom PDF invoice structure dynamically
+    html_template = f"<html><body><h1>Invoice {invoice_num}</h1><p>Customer: {customer_name}</p><p>Total Due: ${total:,.2f}</p></body></html>"
+    pdf_bytes = HTML(string=html_template).write_pdf()
+
+    # Triggers automatic emailing function instantly on submission
+    send_invoice_email(customer_email, customer_name, invoice_num, pdf_bytes)
+
+    return Response("<script>alert('Invoice created and email step processed!'); window.location.href='/';</script>", media_type="text/html")
+
+# --- KEEP THE REST OF EXCEL ENDPOINTS LIVE ---
+@app.post("/api/invoices/import-excel")

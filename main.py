@@ -158,6 +158,7 @@ DASHBOARD_HTML = """
                                             <th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Amount Due</th>
                                             <th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                                         </tr>
-                                    </table>
-                                    <table class="min-w-full divide-y divide-gray-100 text-left bg-white">
-                                        <tbody>##TABLE_ROWS##</tbody>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-100">##TABLE_ROWS##</tbody>
+                                </table>
+                            </div>

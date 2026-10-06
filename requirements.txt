@@ -6,3 +6,5 @@ openpyxl>=3.1.0
 pydantic[email]>=2.0.0
 weasyprint>=59.0
 python-multipart
+jinja2
+psycopg2-binary

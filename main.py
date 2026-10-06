@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import create_engine, func, and_
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -19,7 +19,7 @@ if DATABASE_URL.startswith("postgres://"):
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-app = FastAPI(title="Invoice Engine")
+app = FastAPI(title="Invoice Engine Engine")
 
 def get_db():
     db = SessionLocal()
@@ -75,124 +75,100 @@ def render_dashboard(db: Session = Depends(get_db)):
     total_col = float(kpis.paid or 0.0)
     total_rec = total_rev - total_col
 
-    recent = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
-    rows = "".join([
-        f"<tr><td>{inv.invoice_number}</td><td>{inv.customer.name}</td><td>${inv.total_amount:,.2f}</td><td>{inv.status.value}</td></tr>" 
-        for inv in recent
-    ])
+    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).all()
+    customers_list = db.query(Customer).order_by(Customer.name.asc()).all()
+    
+    rows = ""
+    for inv in recent_invoices:
+        if inv.status == InvoiceStatus.PAID:
+            badge_cls = "bg-green-50 text-green-700 ring-green-600/20"
+        elif inv.status == InvoiceStatus.OVERDUE:
+            badge_cls = "bg-red-50 text-red-700 ring-red-600/10"
+        else:
+            badge_cls = "bg-yellow-50 text-yellow-800 ring-yellow-600/15"
+            
+        pay_btn = ""
+        if inv.status != InvoiceStatus.PAID:
+            pay_btn = f"""
+            <button onclick="openPaymentModal('{inv.invoice_number}', {inv.total_amount - inv.amount_paid})" class="ml-2 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline">
+                [Receive Payment]
+            </button>
+            """
+
+        rows += f"""
+        <tr class="hover:bg-gray-50 transition-colors duration-150">
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{inv.invoice_number}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{inv.customer.name}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${inv.total_amount:,.2f} <span class="text-xs text-gray-400 block">Paid: ${inv.amount_paid:,.2f}</span></td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm flex items-center">
+                <span class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset {badge_cls}">{inv.status.value}</span>
+                {pay_btn}
+            </td>
+        </tr>
+        """
+
+    customer_options = "".join([f"<option value='{c.id}'>{c.name} ({c.email})</option>" for c in customers_list])
+
+    if not rows:
+        rows = '<tr><td colspan="4" class="px-6 py-8 text-center text-sm text-gray-400">No records found. Run scripts or templates to populate.</td></tr>'
 
     return f"""
     <!DOCTYPE html>
-    <html>
+    <html class="h-full bg-gray-50">
     <head>
-        <title>Invoice Hub</title>
-        <style>
-            body {{ font-family: sans-serif; background: #f4f5f8; margin: 0; padding: 30px; }}
-            .box {{ max-width: 1000px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
-            h1 {{ color: #2ca01c; }}
-            .grid {{ display: flex; gap: 20px; margin: 20px 0; }}
-            .card {{ flex: 1; padding: 15px; background: #fafafa; border-radius: 4px; border-left: 4px solid #2ca01c; }}
-            .split {{ display: flex; gap: 30px; margin-top: 30px; }}
-            .side {{ flex: 1; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-            th, td {{ padding: 10px; border-bottom: 1px solid #eee; text-align: left; }}
-            input, button {{ width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; }}
-            button {{ background: #2ca01c; color: white; border: none; font-weight: bold; cursor: pointer; }}
-        </style>
+        <title>QuickBooks Workspace Platform</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://tailwindcss.com"></script>
     </head>
-    <body>
-        <div class="box">
-            <h1>Invoice Manager Workspace</h1>
-            <div class="grid">
-                <div class="card"><h4>Total Revenue</h4><h3>${total_rev:,.2f}</h3></div>
-                <div class="card"><h4>Total Collected</h4><h3>${total_col:,.2f}</h3></div>
-                <div class="card"><h4>Accounts Receivable</h4><h3>${total_rec:,.2f}</h3></div>
-            </div>
-            <div class="split">
-                <div class="side">
-                    <h3>Import Bulk Excel Data</h3>
-                    <form action="/api/invoices/import-excel" method="post" enctype="multipart/form-data">
-                        <input type="file" name="file" accept=".xlsx, .xls" required />
-                        <button type="submit">Upload Spreadsheet</button>
-                    </form>
-                    <h3 style="margin-top:30px;">Recent Activity</h3>
-                    <table>
-                        <thead><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
-                        <tbody>{rows}</tbody>
-                    </table>
+    <body class="h-full font-sans antialiased text-gray-900">
+        <div class="min-h-full">
+            <!-- Navigation Header -->
+            <nav class="bg-white border-b border-gray-200">
+                <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                    <div class="flex h-16 justify-between items-center">
+                        <div class="flex items-center space-x-3">
+                            <div class="bg-emerald-600 p-2 rounded-lg text-white font-black text-xl tracking-tight">QB</div>
+                            <span class="text-xl font-bold tracking-tight text-gray-900">QuickBooks Dashboard Console</span>
+                        </div>
+                        <div class="text-sm font-medium text-gray-500">{datetime.now().strftime('%B %d, %Y')}</div>
+                    </div>
                 </div>
-                <div class="side">
-                    <h3>Quick Bill Generator</h3>
-                    <form action="/web/create" method="post">
-                        <label>Customer Name</label><input type="text" name="customer_name" required />
-                        <label>Customer Email</label><input type="email" name="customer_email" required />
-                        <label>Due Date</label><input type="date" name="due_date" required />
-                        <label>Item Description</label><input type="text" name="desc" required />
-                        <label>Quantity</label><input type="number" name="qty" value="1" step="0.01" required />
-                        <label>Unit Price ($)</label><input type="number" name="price" step="0.01" required />
-                        <button type="submit" style="background:#0077c5;">Create & Email Client</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+            </nav>
 
-# --- INVOICE CREATION HANDLER ---
-@app.post("/web/create")
-def web_create_invoice(
-    customer_name: str = Form(...), customer_email: str = Form(...), due_date: str = Form(...),
-    desc: str = Form(...), qty: float = Form(...), price: float = Form(...), db: Session = Depends(get_db)
-):
-    from weasyprint import HTML
+            <main class="py-10">
+                <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                    
+                    <!-- QUICKBOOKS STYLE SHORTCUT ICONS BAR -->
+                    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-8">
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">Quick Access Navigation Actions</h3>
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <a href="#billing-panel" class="group flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-200 transition-all duration-150">
+                                <div class="p-3 bg-emerald-600 text-white rounded-xl mb-2 shadow-sm group-hover:scale-105 transition-transform duration-150">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                </div>
+                                <span class="text-sm font-bold text-gray-800">Create Invoice</span>
+                            </a>
+                            <a href="#soa-panel" class="group flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-sky-50 hover:border-sky-200 transition-all duration-150">
+                                <div class="p-3 bg-sky-600 text-white rounded-xl mb-2 shadow-sm group-hover:scale-105 transition-transform duration-150">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                                </div>
+                                <span class="text-sm font-bold text-gray-800">Clients / Customers</span>
+                            </a>
+                            <div onclick="alert('Supplier Management tracking panel configuration is coming soon in v1.2 updates!')" class="cursor-pointer group flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-amber-50 hover:border-amber-200 transition-all duration-150">
+                                <div class="p-3 bg-amber-500 text-white rounded-xl mb-2 shadow-sm group-hover:scale-105 transition-transform duration-150">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                                </div>
+                                <span class="text-sm font-bold text-gray-800">Suppliers</span>
+                            </div>
+                        </div>
+                    </div>
 
-    customer = db.query(Customer).filter(Customer.email == customer_email).first()
-    if not customer:
-        customer = Customer(name=customer_name, email=customer_email)
-        db.add(customer)
-        db.flush()
-
-    invoice_num = f"INV-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-    total = qty * price
-
-    inv = Invoice(
-        invoice_number=invoice_num, customer_id=customer.id, due_date=datetime.strptime(due_date, "%Y-%m-%d").date(),
-        subtotal=total, tax_total=0.0, total_amount=total, amount_paid=0.0, status=InvoiceStatus.UNPAID
-    )
-    db.add(inv)
-    db.flush()
-
-    item = InvoiceItem(invoice_id=inv.id, description=desc, quantity=qty, unit_price=price, line_total=total)
-    db.add(item)
-    db.commit()
-
-    html_template = f"<html><body><h1>Invoice {invoice_num}</h1><p>Customer: {customer_name}</p><p>Total Due: ${total:,.2f}</p></body></html>"
-    pdf_bytes = HTML(string=html_template).write_pdf()
-
-    send_invoice_email(customer_email, customer_name, invoice_num, pdf_bytes)
-    return Response("<script>alert('Invoice created successfully!'); window.location.href='/';</script>", media_type="text/html")
-
-# --- EXCEL INGESTION ENGINE ---
-@app.post("/api/invoices/import-excel")
-async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
-    for _, row in df.iterrows():
-        customer = db.query(Customer).filter(Customer.email == row['customer_email']).first()
-        if not customer:
-            customer = Customer(name=row['customer_name'], email=row['customer_email'])
-            db.add(customer)
-            db.flush()
-        if db.query(Invoice).filter(Invoice.invoice_number == str(row['invoice_number'])).first():
-            continue
-        due_dt = pd.to_datetime(row['due_date']).date()
-        total = float(row['total_amount'])
-        inv = Invoice(
-            invoice_number=str(row['invoice_number']), customer_id=customer.id, due_date=due_dt,
-            subtotal=total, tax_total=0.0, total_amount=total, amount_paid=float(row.get('amount_paid', 0.0)),
-            status=InvoiceStatus.PAID if float(row.get('amount_paid', 0.0)) >= total else InvoiceStatus.UNPAID
-        )
-        db.add(inv)
-    db.commit()
-    return Response("<script>alert('Excel records imported successfully!'); window.location.href='/';</script>", media_type="text/html")
+                    <!-- KPI Analytics Cards Grid -->
+                    <div class="grid grid-cols-1 gap-5 sm:grid-cols-3 mb-10">
+                        <div class="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm">
+                            <dt class="text-sm font-medium text-gray-500 uppercase tracking-wider">Gross Revenue</dt>
+                            <dd class="mt-1 text-3xl font-bold text-gray-900">${total_rev:,.2f}</dd>
+                        </div>
+                        <div class="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm">
+                            <dt class="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Collected</dt>

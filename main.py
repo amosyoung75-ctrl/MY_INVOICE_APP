@@ -63,56 +63,112 @@ def send_invoice_email(to_email: str, customer_name: str, invoice_number: str, p
     except Exception:
         return False
 
-# --- COMPACT SYNTAX-SAFE HTML LAYOUT STRUCTURE ---
-def get_dashboard_html():
-    html_segments = [
-        '<!DOCTYPE html><html class="h-full bg-gray-50"><head>',
-        '<title>QuickBooks Workspace Platform</title><meta charset="UTF-8">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-        '<script src="https://tailwindcss.com"></script></head>',
-        '<body class="h-full font-sans antialiased text-gray-900 bg-gray-50">',
-        '<nav class="bg-white border-b border-gray-200"><div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">',
-        '<div class="flex h-16 justify-between items-center"><div class="flex items-center space-x-3">',
-        '<div class="bg-emerald-600 p-2 rounded-lg text-white font-black text-xl">QB</div>',
-        '<span class="text-xl font-bold text-gray-900">QuickBooks Dashboard Console</span>',
-        '</div><div class="text-sm font-medium text-gray-500">##CURRENT_DATE##</div></div></div></nav>',
-        '<main class="py-10"><div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">',
-        '<div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-8">',
-        '<h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">Quick Access Navigation Actions</h3>',
-        '<div class="grid grid-cols-3 gap-4 text-center">',
-        '<a href="#billing-panel" class="flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-emerald-50">',
-        '<span class="text-sm font-bold text-gray-800">➕ Create Invoice</span></a>',
-        '<a href="#soa-panel" class="flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-sky-50">',
-        '<span class="text-sm font-bold text-gray-800">👤 Clients / Customers</span></a>',
-        '<div onclick="alert(\'Supplier feature coming in v1.2!\')" class="cursor-pointer flex flex-col items-center p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-amber-50">',
-        '<span class="text-sm font-bold text-gray-800">🏢 Suppliers</span></div></div></div>',
-        '<div class="grid grid-cols-1 gap-5 sm:grid-cols-3 mb-10">',
-        '<div class="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm"><dt class="text-sm font-medium text-gray-500 uppercase">Gross Revenue</dt><dd class="mt-1 text-3xl font-bold text-gray-900">##TOTAL_REV##</dd></div>',
-        '<div class="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm"><dt class="text-sm font-medium text-gray-500 uppercase">Total Collected</dt><dd class="mt-1 text-3xl font-bold text-emerald-600">##TOTAL_COL##</dd></div>',
-        '<div class="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm"><dt class="text-sm font-medium text-gray-500 uppercase">Accounts Receivable</dt><dd class="mt-1 text-3xl font-bold text-amber-600">##TOTAL_REC##</dd></div>',
-        '</div><div class="grid grid-cols-1 gap-8 lg:grid-cols-12 items-start"><div class="lg:col-span-7 space-y-8">',
-        '<div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden"><div class="border-b border-gray-200 bg-gray-50/50 px-6 py-4"><h3 class="text-base font-bold text-gray-900">Bulk Ingestion Pipeline</h3></div>',
-        '<div class="p-6"><form action="/api/invoices/import-excel" method="post" enctype="multipart/form-data">',
-        '<input type="file" name="file" accept=".xlsx, .xls" class="block w-full border border-gray-300 rounded-lg p-2 text-sm bg-gray-50 mb-4" required onchange="this.form.submit()" />',
-        '</form></div></div><div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">',
-        '<div class="border-b border-gray-200 bg-gray-50/50 px-6 py-4"><h3 class="text-base font-bold text-gray-900">Live Accounts Ledger Registry</h3></div>',
-        '<div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50/70 text-left">',
-        '<tr><th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Invoice</th><th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Customer</th><th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Amount Due</th><th class="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Status</th></tr>',
-        '</thead><tbody class="bg-white divide-y divide-gray-100">##TABLE_ROWS##</tbody></table></div></div></div>',
-        '<div class="lg:col-span-5 space-y-8"><div id="billing-panel" class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">',
-        '<div class="border-b border-gray-200 bg-gray-50/50 px-6 py-4"><h3 class="text-base font-bold text-gray-900">Billing Engine Form</h3></div>',
-        '<form action="/web/create" method="post" class="p-6 space-y-4">',
-        '<div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Customer Account Name</label><input type="text" name="customer_name" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div>',
-        '<div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Notification Email</label><input type="email" name="customer_email" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div>',
-        '<div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Settlement Due Date</label><input type="date" name="due_date" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div>',
-        '<div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Line Description</label><input type="text" name="desc" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div>',
-        '<div class="grid grid-cols-2 gap-4"><div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Volume Qty</label><input type="number" name="qty" value="1" step="0.01" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div>',
-        '<div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Unit Valuation ($)</label><input type="number" name="price" step="0.01" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required /></div></div>',
-        '<button type="submit" class="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-500">Compile & Dispatch Invoice</button></form></div>',
-        '<div id="soa-panel" class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden"><div class="border-b border-gray-200 bg-gray-50/50 px-6 py-4"><h3 class="text-base font-bold text-gray-900">Statement of Account (SOA)</h3></div>',
-        '<form action="/web/soa" method="get" class="p-6 space-y-4"><div><label class="block text-xs font-bold uppercase text-gray-600 mb-1">Select Client Entity Target</label>',
-        '<select name="customer_id" class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" required><option value="">-- Choose Active Client --</option>##CUSTOMER_OPTIONS##</select></div>',
-        '<button type="submit" class="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-500">Compile Statement Report View</button></form></div></div></div></div></main></div>',
-        '<div id="payment-modal" class="hidden fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">',
-        '<div class="bg-white rounded-xl overflow-hidden shadow-xl max-w-md w-full p-6"><h3 class="text-lg font-bold text-gray-900 mb-2">Process Ledger Cash Collection</h3>',
-        '<form action="/web/pay" method="post" class="space-y-4"><input type="hidden" id="modal-invoice-number" name="invoice_number" />',
+# --- COMPACT SYNTAX-SAFE DASHBOARD PAGE ---
+@app.get("/", response_class=HTMLResponse)
+def render_dashboard(db: Session = Depends(get_db)):
+    today = date.today()
+    db.query(Invoice).filter(and_(Invoice.due_date < today, Invoice.status != InvoiceStatus.PAID)).update({"status": InvoiceStatus.OVERDUE})
+    db.commit()
+
+    kpis = db.query(func.sum(Invoice.total_amount).label("total"), func.sum(Invoice.amount_paid).label("paid")).first()
+    total_rev = float(kpis.total or 0.0)
+    total_col = float(kpis.paid or 0.0)
+    total_rec = total_rev - total_col
+
+    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).all()
+    customers_list = db.query(Customer).order_by(Customer.name.asc()).all()
+    
+    rows = ""
+    for inv in recent_invoices:
+        badge = "color:#d97706;background:#fef3c7;padding:4px 8px;border-radius:6px;"
+        if inv.status == InvoiceStatus.PAID:
+            badge = "color:#16a34a;background:#dcfce7;padding:4px 8px;border-radius:6px;"
+        elif inv.status == InvoiceStatus.OVERDUE:
+            badge = "color:#dc2626;background:#fee2e2;padding:4px 8px;border-radius:6px;"
+            
+        pay_btn = ""
+        if inv.status != InvoiceStatus.PAID:
+            rem = inv.total_amount - inv.amount_paid
+            pay_btn = f"<button onclick='openPaymentModal(\"{inv.invoice_number}\", {rem})' style='margin-left:15px;background:none;color:#16a34a;border:none;cursor:pointer;font-weight:bold;'>[Receive Payment]</button>"
+
+        rows += f"<tr style='border-bottom:1px solid #eee;'><td style='padding:12px;font-weight:bold;'>{inv.invoice_number}</td><td style='padding:12px;color:#555;'>{inv.customer.name}</td><td style='padding:12px;font-weight:bold;'>${inv.total_amount:,.2f}<br><span style='font-size:11px;color:#888;'>Paid: ${inv.amount_paid:,.2f}</span></td><td style='padding:12px;'><span style='{badge}'>{inv.status.value}</span>{pay_btn}</td></tr>"
+
+    if not rows:
+        rows = "<tr><td colspan='4' style='padding:30px;text-align:center;color:#999;'>No transactions found. Use the Excel tool or form below to start.</td></tr>"
+
+    customer_options = "".join([f"<option value='{c.id}'>{c.name}</option>" for c in customers_list])
+    current_date = datetime.now().strftime('%B %d, %Y')
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>QuickBooks Console</title>
+        <style>
+            body {{ font-family: system-ui, sans-serif; background: #f4f5f8; margin: 0; padding: 20px; color: #333; }}
+            .nav {{ background: white; padding: 15px 30px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }}
+            .logo {{ display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 18px; }}
+            .qb {{ background: #16a34a; color: white; padding: 6px 12px; border-radius: 6px; font-black: true; }}
+            .main {{ max-width: 1100px; margin: 30px auto; }}
+            .shortcuts {{ background: white; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px; }}
+            .grid-3 {{ display: flex; gap: 20px; margin-bottom: 25px; }}
+            .card {{ flex: 1; background: white; border: 1px solid #ddd; padding: 20px; border-radius: 8px; }}
+            .flex-container {{ display: flex; gap: 25px; align-items: start; }}
+            .left-side {{ flex: 7; display: flex; flex-direction: column; gap: 25px; }}
+            .right-side {{ flex: 5; display: flex; flex-direction: column; gap: 25px; }}
+            .panel {{ background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }}
+            .title {{ padding: 12px 20px; border-bottom: 1px solid #ddd; font-weight: bold; background: #fafafa; }}
+            .content {{ padding: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; text-align: left; }}
+            th {{ background: #fafafa; padding: 10px; border-bottom: 1px solid #ddd; font-size: 12px; text-transform: uppercase; color: #666; }}
+            input, select, button {{ width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }}
+            button {{ background: #16a34a; color: white; border: none; font-weight: bold; cursor: pointer; }}
+            button:hover {{ background: #148a3e; }}
+            .btn-lnk {{ display: inline-block; background: #e2e8f0; color: #333; text-decoration: none; text-align: center; font-weight: bold; padding: 12px 20px; border-radius: 6px; width: 28%; margin-right: 3%; }}
+            .modal {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }}
+        </style>
+    </head>
+    <body>
+        <div class="nav">
+            <div class="logo"><div class="qb">QB</div> QuickBooks Workspace</div>
+            <div style="color: #666;">{current_date}</div>
+        </div>
+        <div class="main">
+            <div class="shortcuts">
+                <h4 style="margin:0 0 15px 0;color:#666;font-size:12px;text-transform:uppercase;">Quick Access Actions</h4>
+                <a href="#billing-panel" class="btn-lnk" style="background:#dcfce7;color:#15803d;">➕ Create Invoice</a>
+                <a href="#soa-panel" class="btn-lnk" style="background:#e0f2fe;color:#0369a1;">👤 Customers / SOA</a>
+                <div onclick="alert('Supplier Tracking coming soon!')" class="btn-lnk" style="background:#fef3c7;color:#b45309;cursor:pointer;">🏢 Suppliers</div>
+            </div>
+            <div class="grid-3">
+                <div class="card"><small style="color:#777;">GROSS REVENUE</small><h2 style="margin:5px 0 0 0;">${total_rev:,.2f}</h2></div>
+                <div class="card"><small style="color:#777;">CASH COLLECTED</small><h2 style="margin:5px 0 0 0;color:#16a34a;">${total_col:,.2f}</h2></div>
+                <div class="card"><small style="color:#777;">ACCOUNTS RECEIVABLE</small><h2 style="margin:5px 0 0 0;color:#b45309;">${total_rec:,.2f}</h2></div>
+            </div>
+            <div class="flex-container">
+                <div class="left-side">
+                    <div class="panel">
+                        <div class="title">Bulk Excel Import Ingestion</div>
+                        <div class="content">
+                            <form action="/api/invoices/import-excel" method="post" enctype="multipart/form-data">
+                                <input type="file" name="file" accept=".xlsx, .xls" required onchange="this.form.submit()" />
+                                <small style="color:#888;">System will automatically parse numbers upon file selection upload.</small>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <div class="title">Accounts Receivable Transaction Registry</div>
+                        <table style="width:100%;">
+                            <thead><tr><th>Invoice No</th><th>Customer</th><th>Amount Due</th><th>Status</th></tr></thead>
+                            <tbody>{rows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="right-side">
+                    <div id="billing-panel" class="panel">
+                        <div class="title">Billing Form Generator</div>
+                        <form action="/web/create" method="post" style="padding:20px;">
+                            <label>Customer Name</label><input type="text" name="customer_name" required />
+                            <label>Customer Email</label><input type="email" name="customer_email" required />
+                            <label>Due Date</label><input type="date" name="due_date" required />
+                            <label>Item Description</label><input type="text" name="desc" required />

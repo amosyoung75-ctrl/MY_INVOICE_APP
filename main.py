@@ -120,8 +120,6 @@ def get_dashboard_metrics(db: Session = Depends(get_db)):
             aging_buckets["30_days"] += unpaid_amt
         elif days_past <= 60:
             aging_buckets["60_days"] += unpaid_amt
-        elif days_past <= 90:
-            aging_buckets["60_days"] += unpaid_amt # keeping standard logic or fixing
         else:
             aging_buckets["90_plus"] += unpaid_amt
 
